@@ -9,6 +9,8 @@
 - Can also run in `always_on` mode for 24/7 monitoring.
 - Uses `codex exec` with `gpt-5.4-mini` when available, with web search and network access enabled.
 - Falls back to a deterministic heuristic review if Codex is unavailable, so the demo still runs.
+- Runs one startup cycle before serving the dashboard so the page always opens with fresh content.
+- Uses a clean white, icon-based homepage with a readable six-class briefing scale.
 - Stores runtime state in `.runtime/` and serves it through a small dashboard.
 - Stays alert-only: no brokerage integration, no auto-sell, no trade execution.
 
@@ -86,11 +88,26 @@ The dashboard and runtime store update a structured heartbeat with fields such a
 - `model`
 - `status`
 - `revision`
+- `overall_score`
+- `overall_label`
 
 ## Operating modes
 
 - `market_hours`: runs hourly during the configured pre-open and market session window.
 - `always_on`: 24/7 mode that keeps checking on the same hourly cadence.
+
+## Briefing scale
+
+The dashboard uses a six-class horizon scale that focuses on whether the story could matter over the next week or month:
+
+- `1` = Strong positive
+- `2` = Okay
+- `3` = Beware / short-term hype
+- `4` = Mixed / watch
+- `5` = Concerning over weeks
+- `6` = Likely bad within weeks
+
+The page shows one tab per symbol with the strongest headlines, a short human-readable summary, and a plain-English note about whether the item looks routine, hype-driven, or genuinely concerning.
 
 ## Safety
 

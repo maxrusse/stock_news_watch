@@ -26,9 +26,10 @@ class DashboardTests(unittest.TestCase):
             snapshot = engine.snapshot()
             html = render_dashboard_html(snapshot, refresh_seconds=10)
             self.assertIn("stock_news_watch", html)
-            self.assertIn("Heartbeat", html)
+            self.assertIn("Select stock", html)
+            self.assertIn("weekly and monthly read", html)
+            self.assertIn("Mixed / watch", html)
 
 
 if __name__ == "__main__":
     unittest.main()
-

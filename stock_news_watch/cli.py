@@ -35,6 +35,11 @@ def load_engine(config_path: str | Path) -> StockNewsWatchEngine:
     return StockNewsWatchEngine(AppConfig.from_file(Path(config_path)))
 
 
+def run_startup_cycle(engine: StockNewsWatchEngine) -> dict:
+    """Run one monitoring cycle immediately so the dashboard starts with fresh data."""
+    return engine.run_cycle(force=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -62,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
+        run_startup_cycle(engine)
         server = serve_dashboard(engine, engine.config.dashboard.host, engine.config.dashboard.port)
         print(f"dashboard listening on http://{engine.config.dashboard.host}:{engine.config.dashboard.port}")
         try:
@@ -72,11 +78,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "demo":
+        run_startup_cycle(engine)
         server = serve_dashboard(engine, engine.config.dashboard.host, engine.config.dashboard.port)
         print(f"dashboard listening on http://{engine.config.dashboard.host}:{engine.config.dashboard.port}")
-        if args.once:
-            engine.run_cycle(force=True)
-        else:
+        if not args.once:
             loop_thread = threading.Thread(target=engine.run_forever, name="stock_news_watch_loop", daemon=True)
             loop_thread.start()
         try:

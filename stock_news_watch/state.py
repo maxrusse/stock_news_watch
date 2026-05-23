@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,9 +23,17 @@ def load_json(path: Path, default: Any) -> Any:
 
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    payload = json.dumps(data, ensure_ascii=True, indent=2)
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
 
 
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:
@@ -102,8 +111,9 @@ def default_state() -> dict[str, Any]:
         "cycle_count": 0,
         "alert_count": 0,
         "source_count": 0,
+        "overall_score": 3,
+        "overall_label": "Mixed / watch",
         "current_summary": "idle",
         "revision": 0,
         "model": "",
     }
-

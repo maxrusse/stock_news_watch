@@ -81,6 +81,8 @@ class StockNewsWatchEngine:
         base["alert_count"] = int(base.get("alert_count", 0) or 0)
         base["source_count"] = int(base.get("source_count", 0) or 0)
         base["revision"] = int(base.get("revision", 0) or 0)
+        if str(base.get("overall_label", "")).strip().lower() == "wait and see":
+            base["overall_label"] = "Mixed / watch"
         return base
 
     def _save_state(self) -> None:
@@ -197,7 +199,9 @@ class StockNewsWatchEngine:
             self._state["cycle_count"] = int(self._state.get("cycle_count", 0) or 0) + 1
             self._state["revision"] = int(self._state.get("revision", 0) or 0) + 1
             self._state["model"] = review.model
-            self._state["current_summary"] = review.summary
+            self._state["overall_score"] = int(review.overall_score)
+            self._state["overall_label"] = review.overall_label
+            self._state["current_summary"] = f"{review.overall_label}: {review.summary}"
             if review.alert:
                 self._state["alert_count"] = int(self._state.get("alert_count", 0) or 0) + 1
                 self._state["last_alert_utc"] = self._state["last_check_utc"]
@@ -208,12 +212,15 @@ class StockNewsWatchEngine:
                 "updated_utc": utc_now(),
                 "status": review.overall_status,
                 "alert": review.alert,
+                "overall_score": review.overall_score,
+                "overall_label": review.overall_label,
                 "summary": review.summary,
                 "reasons": review.reasons,
                 "signals": review.signals,
                 "sources_reviewed": review.sources_reviewed,
                 "decision_source": review.decision_source,
                 "model": review.model,
+                "briefs": review.briefs,
                 "items": [item.to_dict() for item in bundle[:80]],
             }
             self._write_assessment(assessment)
@@ -222,6 +229,8 @@ class StockNewsWatchEngine:
                 "ts_utc": utc_now(),
                 "kind": "cycle",
                 "severity": review.overall_status,
+                "score": review.overall_score,
+                "label": review.overall_label,
                 "summary": review.summary,
                 "symbols": list(self.config.sources.google_queries.keys()),
                 "source_count": len({item.source for item in bundle}),
@@ -246,6 +255,8 @@ class StockNewsWatchEngine:
             "market_time_local": local_now.isoformat(),
             "clean": self._state.get("status") == "clean",
             "alert": self._state.get("status") == "alerting",
+            "overall_score": int(self._state.get("overall_score", 3) or 3),
+            "overall_label": self._state.get("overall_label", "Mixed / watch"),
         }
         return payload
 
@@ -293,6 +304,7 @@ class StockNewsWatchEngine:
                             "revision": int(self._state.get("revision", 0) or 0),
                             "clean": False,
                             "alert": False,
+                            "overall_score": int(self._state.get("overall_score", 3) or 3),
                         }
                     )
             time.sleep(max(5, self.config.runtime.poll_seconds))

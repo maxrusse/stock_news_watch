@@ -57,12 +57,15 @@ class EngineTests(unittest.TestCase):
                         return ReviewResult(
                             overall_status="critical",
                             alert=True,
+                            overall_score=5,
+                            overall_label="Critical sell",
                             summary="critical negative flags detected",
                             reasons=["MSFT guidance cut"],
                             signals=[{"symbol": "MSFT", "severity": "critical", "title": "Microsoft warns of guidance cut", "url": "https://example.com/1", "why": "guidance cut"}],
                             sources_reviewed=["rss"],
                             decision_source="codex",
                             model="gpt-5.4-mini",
+                            briefs=[{"symbol": "MSFT", "score": 5, "label": "Critical sell", "summary": "MSFT is critical sell.", "source_count": 1, "item_count": 1, "themes": ["guidance cut"], "sources": ["rss"], "top_headlines": []}],
                         )
 
                 engine_mod.CodexReviewer = _FakeReviewer
@@ -78,4 +81,3 @@ class EngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
