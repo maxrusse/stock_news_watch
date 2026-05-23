@@ -58,6 +58,18 @@ Check status:
 python -m stock_news_watch status
 ```
 
+## Shutdown
+
+Use the same terminal that started the process and press `Ctrl+C` to stop the dashboard and the loop cleanly.
+
+If the app was started in a detached/background shell, write the stop file and then stop the listener process:
+
+```powershell
+Set-Content -Path .runtime\STOP -Value stop -Encoding utf8
+```
+
+The dashboard port is `8765`. If a detached server keeps listening after the stop file is written, stop that terminal or process once the loop has noticed the stop request.
+
 ## Codex setup
 
 To use the Codex-powered review path, install and authenticate the Codex CLI, then make sure `codex` is on your `PATH`.
