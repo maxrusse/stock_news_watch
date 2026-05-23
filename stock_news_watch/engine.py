@@ -188,7 +188,7 @@ class StockNewsWatchEngine:
             review = reviewer.review(
                 items=bundle,
                 symbols=list(self.config.sources.google_queries.keys()),
-                codex_home=self.paths.root / ".codex_home",
+                codex_home=self.paths.root / "codex_home",
                 thread_file=self.paths.codex_thread_file,
                 trace_dir=self.paths.codex_trace_dir,
             )

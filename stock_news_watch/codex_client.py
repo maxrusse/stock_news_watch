@@ -129,6 +129,13 @@ class CodexReviewer:
         trace_dir = trace_dir or Path(".runtime/codex_traces")
         trace_dir.mkdir(parents=True, exist_ok=True)
         bundles = build_symbol_bundles(items)
+        from shutil import which
+        resolved_exe = which(self.exe) or self.exe
+        exe_lower = resolved_exe.lower()
+        launcher_prefix = [resolved_exe]
+        if exe_lower.endswith((".cmd", ".bat")):
+            launcher_prefix = ["cmd.exe", "/d", "/s", "/c", resolved_exe]
+        web_search_mode = "live" if str(self.web_search_mode).strip().lower() == "auto" else self.web_search_mode
 
         payload = {
             "symbols": symbols,
@@ -207,7 +214,21 @@ class CodexReviewer:
                             "critical_notes": {"type": "array", "items": {"type": "string"}},
                             "routine_notes": {"type": "array", "items": {"type": "string"}},
                         },
-                        "required": ["symbol", "score", "label", "summary", "source_count", "item_count", "themes", "sources", "top_headlines"],
+                        "required": [
+                            "symbol",
+                            "score",
+                            "label",
+                            "takeaway",
+                            "why_it_matters",
+                            "summary",
+                            "source_count",
+                            "item_count",
+                            "themes",
+                            "sources",
+                            "top_headlines",
+                            "critical_notes",
+                            "routine_notes",
+                        ],
                         "additionalProperties": False,
                     },
                 },
@@ -220,7 +241,7 @@ class CodexReviewer:
         schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
 
         cmd = [
-            self.exe,
+            *launcher_prefix,
             "exec",
             "--json",
             "--model",
@@ -232,18 +253,12 @@ class CodexReviewer:
             "--config",
             f'model_reasoning_effort="{self.reasoning_effort}"',
             "--config",
-            f'web_search="{self.web_search_mode}"',
+            f'web_search="{web_search_mode}"',
             "--config",
             "sandbox_workspace_write.network_access=" + ("true" if self.network_access_enabled else "false"),
         ]
         if self.skip_git_repo_check:
             cmd.append("--skip-git-repo-check")
-
-        thread_id = ""
-        if thread_file.exists():
-            thread_id = thread_file.read_text(encoding="utf-8", errors="ignore").strip()
-        if thread_id:
-            cmd.extend(["resume", thread_id])
 
         env = {**os.environ, "CODEX_HOME": str(codex_home)}
         try:
@@ -257,12 +272,14 @@ class CodexReviewer:
                 timeout=max(10, self.timeout_sec),
                 env=env,
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            (trace_dir / "codex_review_error.txt").write_text(f"FileNotFoundError: {exc}", encoding="utf-8")
             return HeuristicReviewer().review(items, model=self.model)
-        except OSError:
+        except OSError as exc:
+            (trace_dir / "codex_review_error.txt").write_text(f"OSError: {exc}", encoding="utf-8")
             return HeuristicReviewer().review(items, model=self.model)
         trace_file = trace_dir / "codex_review_trace.jsonl"
-        trace_file.write_text(proc.stdout or "", encoding="utf-8")
+        trace_file.write_text((proc.stdout or "") + ("\n---stderr---\n" + proc.stderr if proc.stderr else ""), encoding="utf-8")
 
         parsed = _parse_codex_jsonl(proc.stdout or "")
         if parsed is None:
