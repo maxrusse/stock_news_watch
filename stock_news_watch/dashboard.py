@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from .engine import StockNewsWatchEngine
 
 
-HUMAN_LEVELS = {
+LEVEL_COPY = {
     1: "Strong positive",
     2: "Okay",
     3: "Beware / short-term hype",
@@ -24,7 +24,6 @@ def render_dashboard_html(snapshot: dict[str, Any], refresh_seconds: int) -> str
     heartbeat = snapshot.get("heartbeat", {}) or {}
     state = snapshot.get("state", {}) or {}
     assessment = snapshot.get("assessment", {}) or {}
-    events = snapshot.get("recent_events", []) or []
     briefs = assessment.get("briefs", []) or []
 
     def esc(value: Any) -> str:
@@ -36,174 +35,101 @@ def render_dashboard_html(snapshot: dict[str, Any], refresh_seconds: int) -> str
             .replace('"', "&quot;")
         )
 
-    def icon_svg(kind: str) -> str:
-        icons = {
-            "brand": '<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="b" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#2563eb"/><stop offset="100%" stop-color="#0f766e"/></linearGradient></defs><circle cx="24" cy="24" r="21" fill="#fff" stroke="url(#b)" stroke-width="1.8"/><path d="M12 27c4-1 7-5 9-11 1 7 5 12 10 14 3 1 5 1 8 0" fill="none" stroke="url(#b)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="32" cy="16" r="2.4" fill="#0f766e"/></svg>',
-            "clock": '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            "shield": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.2-2.7 7.6-7 9-4.3-1.4-7-4.8-7-9V6l7-3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
-            "trend": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16l5-5 4 4 7-8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h4v4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-            "alert": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l9 16H3L12 4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="17" r="1" fill="currentColor"/></svg>',
-            "news": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h10v14H5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M15 8h4v11H7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 9h6M8 12h6M8 15h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
-            "tabs": '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
-        }
-        return icons.get(kind, icons["news"])
+    def tab_id(symbol: str) -> str:
+        return f"panel-{symbol.lower()}"
 
-    def score_class(score: int) -> str:
-        if score >= 6:
-            return "score-urgent"
-        if score == 5:
-            return "score-concerning"
-        if score == 4:
-            return "score-watch"
-        if score == 3:
-            return "score-hype"
-        if score == 2:
-            return "score-ok"
-        return "score-positive"
+    if not briefs:
+        briefs = []
 
-    def level_text(score: int) -> str:
-        return HUMAN_LEVELS.get(score, "Mixed / watch")
-
-    def tab_label(brief: dict[str, Any]) -> str:
-        symbol = esc(brief.get("symbol", ""))
-        score = int(brief.get("score", 3) or 3)
-        return f"{symbol} · {level_text(score)}"
-
-    if briefs:
-        active_symbol = str(briefs[0].get("symbol", ""))
-    else:
-        active_symbol = ""
-
-    tab_buttons: list[str] = []
+    active_symbol = str(briefs[0].get("symbol", "")) if briefs else ""
+    tabs: list[str] = []
     panels: list[str] = []
 
     for brief in briefs:
-        symbol = esc(brief.get("symbol", ""))
+        symbol = str(brief.get("symbol", "")).upper()
         score = int(brief.get("score", 3) or 3)
-        active = "active" if str(brief.get("symbol", "")) == active_symbol else ""
-        title_label = esc(level_text(score))
+        label = esc(brief.get("label", LEVEL_COPY.get(score, "Mixed / watch")))
+        takeaway = esc(brief.get("takeaway") or brief.get("summary", ""))
+        why_it_matters = esc(brief.get("why_it_matters") or brief.get("summary", ""))
         summary = esc(brief.get("summary", ""))
-        critical_count = int(brief.get("critical_count", 0) or 0)
-        routine_count = int(brief.get("routine_count", 0) or 0)
-        item_count = int(brief.get("item_count", 0) or 0)
         source_count = int(brief.get("source_count", 0) or 0)
-
-        tag_pills = "".join(f'<span class="mini-pill">{esc(theme)}</span>' for theme in brief.get("themes", [])[:4])
-        if not tag_pills:
-            tag_pills = '<span class="mini-pill soft">No major theme</span>'
-
-        source_pills = "".join(f'<span class="mini-pill soft">{esc(source)}</span>' for source in brief.get("sources", [])[:4])
-        if not source_pills:
-            source_pills = '<span class="mini-pill soft">No source yet</span>'
-
-        notes: list[str] = []
-        if score >= 4:
-            notes = brief.get("critical_notes", [])[:4]
-        elif routine_count:
-            notes = brief.get("routine_notes", [])[:4]
-        if not notes:
-            notes = [brief.get("summary", "Nothing clearly market-moving here.")]
-
-        note_items = "".join(f"<li>{esc(note)}</li>" for note in notes)
-
-        headlines: list[str] = []
-        for headline in brief.get("top_headlines", [])[:4]:
-            tone = esc(headline.get("tone", "neutral"))
-            why = esc(headline.get("why", ""))
-            source = esc(headline.get("source", ""))
-            title = esc(headline.get("title", ""))
-            url = esc(headline.get("url", "#"))
-            reading = "routine" if "Routine filing" in why else ("watch" if tone == "negative" and score < 5 else "important" if tone == "negative" else ("hype" if score == 3 else "context"))
+        item_count = int(brief.get("item_count", 0) or 0)
+        sources = ", ".join(str(s) for s in brief.get("sources", [])[:4]) or "No sources yet"
+        top_headlines = brief.get("top_headlines", [])[:3]
+        themes = [esc(theme) for theme in (brief.get("themes", []) or [])[:4]]
+        critical_notes = [esc(note) for note in (brief.get("critical_notes", []) or [])[:4]]
+        routine_notes = [esc(note) for note in (brief.get("routine_notes", []) or [])[:4]]
+        headlines = []
+        for item in top_headlines:
             headlines.append(
                 f"""
-                <li class="headline {tone}">
-                  <div class="headline-top">
-                    <a href="{url}" target="_blank" rel="noreferrer">{title}</a>
-                    <span class="headline-chip">{reading}</span>
-                  </div>
-                  <div class="headline-meta">{source}{f" · {why}" if why else ""}</div>
+                <li class="evidence">
+                  <a href="{esc(item.get('url', '#'))}" target="_blank" rel="noreferrer">{esc(item.get('title', ''))}</a>
+                  <div class="meta">{esc(item.get('source', ''))}{f" · {esc(item.get('why', ''))}" if item.get('why') else ""}</div>
                 </li>
                 """
             )
 
-        tab_buttons.append(
+        is_active = "active" if symbol == active_symbol else ""
+        tabs.append(
             f"""
-            <button class="tab-button {active}" type="button" data-symbol="{symbol}">
-              <span class="tab-symbol">{symbol}</span>
-              <span class="tab-score {score_class(score)}">{score}</span>
-              <span class="tab-text">{title_label}</span>
+            <button class="tab {is_active}" type="button" data-target="{tab_id(symbol)}">
+              <span class="sym">{symbol}</span>
+              <span class="score score-{score}">{score}</span>
+              <span class="lab">{label}</span>
             </button>
             """
         )
-
         panels.append(
             f"""
-            <section class="panel {active}" data-panel="{symbol}">
-              <div class="panel-header">
+            <section class="panel {is_active}" id="{tab_id(symbol)}" data-panel="{tab_id(symbol)}">
+              <div class="panel-head">
                 <div>
                   <div class="panel-symbol">{symbol}</div>
-                  <div class="panel-label">{title_label}</div>
+                  <div class="panel-label">{label}</div>
                 </div>
-                <div class="score-box {score_class(score)}">
-                  <div class="score-number">{score}</div>
-                  <div class="score-caption">week / month</div>
+                <div class="panel-score score-{score}">{score}/6</div>
+              </div>
+              <p class="summary">{takeaway}</p>
+              <div class="detail-grid">
+                <div class="detail-card">
+                  <div class="detail-kicker">Why it matters</div>
+                  <div class="detail-body">{why_it_matters}</div>
+                </div>
+                <div class="detail-card">
+                  <div class="detail-kicker">How to read it</div>
+                  <div class="detail-body">1-2 means mostly fine. 3 means hype or noise. 4 means mixed. 5-6 means watch closely because it could hurt over weeks.</div>
                 </div>
               </div>
-
-              <p class="panel-summary">{summary}</p>
-
-              <div class="panel-grid">
-                <div class="panel-main">
-                  <div class="section-card">
-                    <div class="section-title">{icon_svg("alert")} What this means</div>
-                    <div class="section-copy">
-                      This score is about whether the story could become a real issue over the next week or month, not about tiny intraday swings.
-                    </div>
-                    <ul class="note-list">{note_items}</ul>
-                  </div>
-
-                  <div class="section-card">
-                    <div class="section-title">{icon_svg("news")} What we found</div>
-                    <div class="chip-row">{tag_pills}</div>
-                    <div class="chip-row">{source_pills}</div>
-                    <ul class="headline-list">
-                      {''.join(headlines) if headlines else '<li class="headline neutral"><div class="headline-meta">No headlines yet.</div></li>'}
-                    </ul>
-                  </div>
-                </div>
-
-                <aside class="panel-side">
-                  <div class="side-card">
-                    <div class="side-title">Quick read</div>
-                    <div class="big-read">{level_text(score)}</div>
-                    <div class="side-copy">
-                      {'This looks like a real concern over the next few weeks.' if score >= 5 else 'This looks mostly okay, mixed, or just short-term hype.'}
-                    </div>
-                  </div>
-                  <div class="side-card">
-                    <div class="side-title">Counts</div>
-                    <div class="count-grid">
-                      <div><span>Items</span><strong>{item_count}</strong></div>
-                      <div><span>Sources</span><strong>{source_count}</strong></div>
-                      <div><span>Flags</span><strong>{critical_count}</strong></div>
-                      <div><span>Routine</span><strong>{routine_count}</strong></div>
-                    </div>
-                  </div>
-                </aside>
+              <div class="quick">
+                <span>{item_count} items</span>
+                <span>{source_count} sources</span>
+                <span>{sources}</span>
               </div>
+              <div class="section-title">Themes</div>
+              <div class="theme-row">
+                {''.join(f'<span class="theme-pill">{theme}</span>' for theme in themes) if themes else '<span class="theme-pill muted">No clear theme yet</span>'}
+              </div>
+              <div class="section-title">Important vs routine</div>
+              <div class="note-columns">
+                <div>
+                  <div class="note-heading">Important</div>
+                  <ul class="note-list">
+                    {''.join(f'<li>{note}</li>' for note in critical_notes) if critical_notes else '<li class="muted">Nothing clearly critical in the current bundle.</li>'}
+                  </ul>
+                </div>
+                <div>
+                  <div class="note-heading">Probably routine</div>
+                  <ul class="note-list">
+                    {''.join(f'<li>{note}</li>' for note in routine_notes) if routine_notes else '<li class="muted">No obvious routine note yet.</li>'}
+                  </ul>
+                </div>
+              </div>
+              <div class="section-title">What Codex saw</div>
+              <ul class="list">
+                {''.join(headlines) if headlines else '<li class="evidence muted">No headlines yet.</li>'}
+              </ul>
             </section>
-            """
-        )
-
-    event_rows = []
-    for event in reversed(events[-6:]):
-        event_rows.append(
-            f"""
-            <li class="event-row">
-              <span class="event-time">{esc(event.get('ts_utc', ''))}</span>
-              <span class="event-label">{esc(event.get('label', event.get('severity', '')))}</span>
-              <span class="event-summary">{esc(event.get('summary', ''))}</span>
-            </li>
             """
         )
 
@@ -217,520 +143,296 @@ def render_dashboard_html(snapshot: dict[str, Any], refresh_seconds: int) -> str
   <style>
     :root {{
       --bg: #fbfcfe;
-      --panel: rgba(255, 255, 255, 0.97);
-      --panel-soft: #f8fafc;
+      --panel: #ffffff;
       --text: #101828;
       --muted: #667085;
-      --accent: #2563eb;
-      --accent2: #0f766e;
-      --danger: #dc2626;
-      --warning: #d97706;
+      --border: rgba(16,24,40,0.08);
       --good: #16a34a;
-      --border: rgba(16, 24, 40, 0.08);
+      --info: #2563eb;
+      --hype: #d97706;
+      --watch: #7c3aed;
+      --concern: #b45309;
+      --bad: #dc2626;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      min-height: 100vh;
       color: var(--text);
       background:
-        radial-gradient(circle at top left, rgba(37, 99, 235, 0.04), transparent 30%),
-        radial-gradient(circle at 80% 0%, rgba(15, 118, 110, 0.04), transparent 24%),
+        radial-gradient(circle at top left, rgba(37,99,235,.04), transparent 30%),
         linear-gradient(180deg, #fbfcfe 0%, #ffffff 100%);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }}
-    a {{ color: inherit; text-decoration: none; }}
-    a:hover {{ text-decoration: underline; }}
-    .wrap {{ max-width: 1280px; margin: 0 auto; padding: 28px; }}
+    .wrap {{ max-width: 1120px; margin: 0 auto; padding: 28px; }}
     .hero {{
-      display: grid;
-      grid-template-columns: 1.6fr 0.9fr;
-      gap: 18px;
       padding: 24px;
       border: 1px solid var(--border);
-      border-radius: 28px;
-      background: rgba(255, 255, 255, 0.88);
-      box-shadow: 0 18px 50px rgba(16, 24, 40, 0.05);
-      backdrop-filter: blur(12px);
+      border-radius: 26px;
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 16px 40px rgba(16,24,40,.05);
     }}
-    .brandline {{ display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }}
-    .brand-mark {{ width: 46px; height: 46px; flex: 0 0 auto; }}
-    .brand-copy {{ display: grid; gap: 4px; }}
-    .brand-kicker {{
+    .eyebrow {{
       color: var(--muted);
-      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.18em;
-      font-weight: 700;
+      letter-spacing: .16em;
+      font-size: 11px;
+      font-weight: 800;
     }}
-    .brand-title {{
-      margin: 0;
-      font-size: 42px;
+    h1 {{
+      margin: 8px 0 10px;
+      font-size: 40px;
       line-height: 1;
-      letter-spacing: -0.05em;
+      letter-spacing: -.05em;
     }}
-    .subtitle {{
+    .sub {{
       margin: 0;
-      max-width: 820px;
+      max-width: 780px;
       color: var(--muted);
-      font-size: 15px;
       line-height: 1.7;
+      font-size: 15px;
     }}
-    .pillbar {{
+    .meta-row {{
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-top: 18px;
     }}
-    .pill {{
+    .chip {{
       display: inline-flex;
       align-items: center;
       gap: 8px;
       padding: 8px 12px;
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.95);
       border: 1px solid var(--border);
-      color: var(--text);
+      background: #fff;
       font-size: 13px;
     }}
-    .pill svg {{ width: 14px; height: 14px; }}
-    .panel {{
+    .score {{
+      min-width: 28px;
+      height: 28px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #fff;
+      font-weight: 800;
+      font-size: 13px;
+    }}
+    .score-1, .score-2 {{ background: var(--good); }}
+    .score-3 {{ background: var(--hype); }}
+    .score-4 {{ background: var(--watch); }}
+    .score-5 {{ background: var(--concern); }}
+    .score-6 {{ background: var(--bad); }}
+    .board {{
+      margin-top: 18px;
       padding: 18px;
+      border: 1px solid var(--border);
       border-radius: 24px;
       background: var(--panel);
-      border: 1px solid var(--border);
-      box-shadow: 0 10px 34px rgba(16, 24, 40, 0.05);
+      box-shadow: 0 10px 30px rgba(16,24,40,.05);
     }}
-    .status-card {{
-      display: grid;
-      gap: 14px;
-      align-content: start;
-    }}
-    .metric-card {{
-      padding: 16px;
-      border-radius: 18px;
-      background: var(--panel-soft);
-      border: 1px solid var(--border);
-    }}
-    .metric-label {{
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }}
-    .metric-value {{
-      margin-top: 8px;
-      font-size: 22px;
-      font-weight: 800;
-    }}
-    .metric-copy {{
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.55;
-    }}
-    .topline {{
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 18px;
-      margin-top: 18px;
-    }}
-    .tabs-panel {{
-      padding: 14px;
-    }}
-    .tabbar {{
+    .tabs {{
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-bottom: 16px;
     }}
-    .tab-button {{
+    .tab {{
       display: inline-flex;
       align-items: center;
       gap: 10px;
       padding: 11px 14px;
       border-radius: 16px;
       border: 1px solid var(--border);
-      background: #ffffff;
+      background: #fff;
       color: var(--text);
       cursor: pointer;
-      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
     }}
-    .tab-button.active {{
-      border-color: rgba(37, 99, 235, 0.25);
-      box-shadow: 0 8px 22px rgba(37, 99, 235, 0.08);
+    .tab.active {{
+      border-color: rgba(37,99,235,.22);
+      box-shadow: 0 10px 24px rgba(37,99,235,.08);
     }}
-    .tab-symbol {{ font-weight: 800; letter-spacing: -0.02em; }}
-    .tab-score {{
-      min-width: 28px;
-      height: 28px;
-      display: inline-grid;
-      place-items: center;
-      border-radius: 999px;
-      font-weight: 800;
-      color: #fff;
-      font-size: 13px;
-    }}
-    .tab-text {{ color: var(--muted); font-size: 13px; }}
-    .tab-score.score-positive {{ background: var(--good); }}
-    .tab-score.score-ok {{ background: #2563eb; }}
-    .tab-score.score-hype {{ background: #d97706; }}
-    .tab-score.score-watch {{ background: #7c3aed; }}
-    .tab-score.score-concerning {{ background: #b45309; }}
-    .tab-score.score-urgent {{ background: var(--danger); }}
-    .panel-grid {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
-      gap: 16px;
-      margin-top: 16px;
-    }}
-    .panel[hidden] {{ display: none; }}
-    .panel-header {{
+    .tab .sym {{ font-weight: 900; }}
+    .tab .lab {{ color: var(--muted); font-size: 13px; }}
+    .panel {{ display: none; }}
+    .panel.active {{ display: block; }}
+    .panel-head {{
       display: flex;
       justify-content: space-between;
-      gap: 16px;
+      gap: 14px;
       align-items: flex-start;
     }}
-    .panel-symbol {{ font-size: 26px; font-weight: 900; letter-spacing: -0.04em; }}
-    .panel-label {{ margin-top: 4px; color: var(--muted); font-size: 14px; }}
-    .score-box {{
-      min-width: 96px;
-      padding: 12px 14px;
+    .panel-symbol {{ font-size: 26px; font-weight: 900; letter-spacing: -.04em; }}
+    .panel-label {{ color: var(--muted); margin-top: 4px; }}
+    .panel-score {{
+      min-width: 76px;
+      padding: 12px;
       border-radius: 18px;
+      color: #fff;
       text-align: center;
-      border: 1px solid var(--border);
-      background: var(--panel-soft);
+      font-weight: 900;
+      font-size: 28px;
+      line-height: 1;
     }}
-    .score-box.score-positive {{ border-color: rgba(22, 163, 74, 0.2); }}
-    .score-box.score-ok {{ border-color: rgba(37, 99, 235, 0.2); }}
-    .score-box.score-hype {{ border-color: rgba(217, 119, 6, 0.25); }}
-    .score-box.score-watch {{ border-color: rgba(124, 58, 237, 0.2); }}
-    .score-box.score-concerning {{ border-color: rgba(180, 83, 9, 0.25); }}
-    .score-box.score-urgent {{ border-color: rgba(220, 38, 38, 0.25); }}
-    .score-number {{ font-size: 32px; line-height: 1; font-weight: 900; }}
-    .score-caption {{ margin-top: 6px; color: var(--muted); font-size: 12px; }}
-    .panel-summary {{
+    .summary {{
       margin: 14px 0 0;
-      color: var(--text);
-      font-size: 15px;
-      line-height: 1.65;
+      font-size: 16px;
+      line-height: 1.7;
     }}
-    .section-card {{
-      margin-top: 16px;
-      padding: 16px;
-      border-radius: 20px;
+    .detail-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }}
+    .detail-card {{
+      padding: 14px;
+      border-radius: 18px;
+      background: #f8fafc;
       border: 1px solid var(--border);
-      background: #ffffff;
     }}
-    .section-title {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
+    .detail-kicker {{
+      color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--muted);
+      letter-spacing: .08em;
+      font-size: 11px;
       font-weight: 800;
+      margin-bottom: 8px;
     }}
-    .section-title svg {{ width: 14px; height: 14px; color: var(--accent); }}
-    .section-copy {{
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }}
-    .note-list {{
-      margin: 12px 0 0;
-      padding-left: 18px;
-      color: var(--text);
-      line-height: 1.55;
+    .detail-body {{
+      line-height: 1.65;
       font-size: 14px;
     }}
-    .note-list li {{ margin: 6px 0; }}
-    .chip-row {{
+    .quick {{
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
     }}
-    .mini-pill {{
-      display: inline-flex;
-      align-items: center;
+    .quick span {{
       padding: 5px 10px;
       border-radius: 999px;
-      background: rgba(123, 223, 242, 0.16);
-      border: 1px solid rgba(123, 223, 242, 0.24);
+      background: #f8fafc;
+      border: 1px solid var(--border);
+    }}
+    .theme-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }}
+    .theme-pill {{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fff;
       font-size: 12px;
       color: var(--text);
     }}
-    .mini-pill.soft {{
-      background: #f8fafc;
-      border-color: var(--border);
+    .theme-pill.muted,
+    .muted {{
       color: var(--muted);
     }}
-    .headline-list {{
+    .note-columns {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }}
+    .note-heading {{
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }}
+    .note-list {{
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text);
+      line-height: 1.6;
+      display: grid;
+      gap: 6px;
+    }}
+    .section-title {{
+      margin-top: 18px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      font-size: 11px;
+      font-weight: 800;
+    }}
+    .list {{
       display: grid;
       gap: 10px;
-      margin-top: 14px;
+      margin-top: 10px;
+      padding: 0;
+      list-style: none;
     }}
-    .headline {{
+    .evidence {{
       padding: 12px 14px;
       border-radius: 16px;
       background: #f8fafc;
-      border-left: 4px solid transparent;
+      border-left: 4px solid var(--border);
     }}
-    .headline.negative {{ border-left-color: var(--danger); }}
-    .headline.neutral {{ border-left-color: var(--warning); }}
-    .headline.positive {{ border-left-color: var(--good); }}
-    .headline-top {{
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: flex-start;
-    }}
-    .headline a {{ font-weight: 800; color: var(--text); }}
-    .headline-chip {{
-      flex: 0 0 auto;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.8);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }}
-    .headline-meta {{
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }}
-    .panel-side {{
-      display: grid;
-      gap: 12px;
-      align-content: start;
-    }}
-    .side-card {{
-      padding: 16px;
-      border-radius: 18px;
-      border: 1px solid var(--border);
-      background: #ffffff;
-    }}
-    .side-title {{
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      font-weight: 800;
-    }}
-    .big-read {{
-      margin-top: 8px;
-      font-size: 22px;
-      font-weight: 900;
-      letter-spacing: -0.03em;
-    }}
-    .side-copy {{
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }}
-    .count-grid {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 12px;
-    }}
-    .count-grid div {{
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: var(--panel-soft);
-      border: 1px solid var(--border);
-    }}
-    .count-grid span {{
-      display: block;
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 6px;
-    }}
-    .count-grid strong {{ font-size: 20px; }}
-    .overview-grid {{
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-    }}
-    .overview-tile {{
-      padding: 14px;
-      border-radius: 18px;
-      background: #ffffff;
-      border: 1px solid var(--border);
-    }}
-    .overview-label {{
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-weight: 800;
-    }}
-    .overview-value {{
-      margin-top: 8px;
-      font-size: 22px;
-      font-weight: 900;
-    }}
-    .overview-copy {{
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.55;
-    }}
-    .event-list {{
-      margin-top: 10px;
-      display: grid;
-      gap: 10px;
-    }}
-    .event-row {{
-      display: grid;
-      grid-template-columns: 160px 150px 1fr;
-      gap: 10px;
-      padding: 12px 0;
-      border-bottom: 1px solid rgba(16, 24, 40, 0.08);
-    }}
-    .event-time, .event-label {{
-      color: var(--muted);
-      font-size: 12px;
-    }}
-    .event-label {{ font-weight: 800; color: var(--accent2); }}
+    .evidence a {{ font-weight: 800; color: var(--text); }}
+    .evidence .meta {{ color: var(--muted); margin-top: 4px; font-size: 12px; line-height: 1.45; }}
+    .evidence.muted {{ color: var(--muted); }}
     .footer {{
-      margin: 16px 0 30px;
+      margin: 14px 0 30px;
       color: var(--muted);
       font-size: 12px;
     }}
-    .alert-note {{
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.6;
-    }}
-    @media (max-width: 980px) {{
-      .hero, .topline, .panel-grid {{ grid-template-columns: 1fr; }}
-      .overview-grid {{ grid-template-columns: 1fr 1fr; }}
-      .event-row {{ grid-template-columns: 1fr; }}
-      .brand-title {{ font-size: 32px; }}
-      .panel-header {{ flex-direction: column; }}
+    @media (max-width: 860px) {{
+      h1 {{ font-size: 32px; }}
+      .panel-head {{ flex-direction: column; }}
+      .panel-score {{ align-self: flex-start; }}
+      .detail-grid,
+      .note-columns {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
 <body>
   <div class="wrap">
     <section class="hero">
-      <div>
-        <div class="brandline">
-          <div class="brand-mark">{icon_svg("brand")}</div>
-          <div class="brand-copy">
-            <div class="brand-kicker">Live market briefing</div>
-            <h1 class="brand-title">stock_news_watch</h1>
-          </div>
-        </div>
-        <p class="subtitle">
-          This page is tuned for a weekly and monthly read, not for tiny intraday moves.
-          It groups the live news into one tab per stock so you can see if the story is just noise, worth watching, or likely to turn bad.
-        </p>
-        <div class="pillbar">
-          <span class="pill">{icon_svg("clock")} Refresh {refresh_seconds}s</span>
-          <span class="pill">{icon_svg("shield")} Status <strong>{esc(heartbeat.get('status') or state.get('status') or 'idle')}</strong></span>
-          <span class="pill">{icon_svg("trend")} Overall <strong>{esc(assessment.get('overall_score', heartbeat.get('overall_score', 3)))}</strong>/5</span>
-          <span class="pill">{icon_svg("news")} {esc(assessment.get('overall_label') or state.get('overall_label') or 'Mixed / watch')}</span>
-        </div>
-      </div>
-      <div class="status-card">
-        <div class="metric-card">
-          <div class="metric-label">Overall read</div>
-          <div class="metric-value">{esc(assessment.get('overall_label') or state.get('overall_label') or 'Mixed / watch')}</div>
-          <div class="metric-copy">
-            This is the combined view across all watched stocks, focused on whether anything looks likely to matter in the next week or month.
-          </div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Current briefing</div>
-          <div class="metric-value" style="font-size: 18px; line-height: 1.45;">{esc(heartbeat.get('last_summary') or state.get('current_summary') or 'No data yet')}</div>
-          <div class="metric-copy">
-            Last check: {esc(heartbeat.get('last_check_utc') or state.get('last_check_utc') or 'n/a')}<br/>
-            Last alert: {esc(heartbeat.get('last_alert_utc') or state.get('last_alert_utc') or 'n/a')}
-          </div>
-        </div>
+      <div class="eyebrow">Live market briefing</div>
+      <h1>stock_news_watch</h1>
+      <p class="sub">
+        One tab per stock. Codex reads the live evidence and decides whether the story is strong, hype, mixed, watch-worthy, or actually bad over the next week or month.
+      </p>
+      <div class="meta-row">
+        <span class="chip">Status <strong>{esc(heartbeat.get('status') or state.get('status') or 'idle')}</strong></span>
+        <span class="chip">Overall <strong>{esc(assessment.get('overall_label') or state.get('overall_label') or 'Mixed / watch')}</strong></span>
+        <span class="chip">Score <strong>{esc(assessment.get('overall_score', heartbeat.get('overall_score', 3)))}</strong>/6</span>
+        <span class="chip">Refresh {refresh_seconds}s</span>
       </div>
     </section>
 
-    <section class="topline">
-      <div class="panel">
-        <div class="overview-grid">
-          <div class="overview-tile">
-            <div class="overview-label">{icon_svg("clock")} Cycle count</div>
-            <div class="overview-value">{esc(heartbeat.get('cycle_count', 0))}</div>
-            <div class="overview-copy">How many live checks have run so far.</div>
-          </div>
-          <div class="overview-tile">
-            <div class="overview-label">{icon_svg("news")} Sources</div>
-            <div class="overview-value">{esc(heartbeat.get('source_count', 0))}</div>
-            <div class="overview-copy">How many distinct live sources were used.</div>
-          </div>
-          <div class="overview-tile">
-            <div class="overview-label">{icon_svg("alert")} Alerts</div>
-            <div class="overview-value">{esc(heartbeat.get('alert_count', state.get('alert_count', 0)))}</div>
-            <div class="overview-copy">Only real concern flags, not routine noise.</div>
-          </div>
-          <div class="overview-tile">
-            <div class="overview-label">{icon_svg("tabs")} Stocks</div>
-            <div class="overview-value">{esc(len(briefs))}</div>
-            <div class="overview-copy">One tab per stock for a quick read.</div>
-          </div>
-        </div>
-        <div class="alert-note">
-          The score is a horizon score. A 5 or 6 means the story could become a real problem in the next week or month. A 1 to 4 usually means it is okay, hype, mixed, or still just watchable.
-        </div>
+    <section class="board">
+      <div class="tabs">
+        {''.join(tabs) if tabs else '<span class="chip">No stock briefs yet. Run one cycle to populate.</span>'}
       </div>
-
-      <div class="panel">
-        <div class="metric-label">Recent events</div>
-        <div class="event-list">
-          {''.join(event_rows) if event_rows else '<div class="overview-copy">No events yet.</div>'}
-        </div>
-      </div>
-    </section>
-
-    <section class="panel tabs-panel" style="margin-top: 18px;">
-      <div class="metric-label">Select stock</div>
-      <div class="tabbar">
-        {''.join(tab_buttons) if tab_buttons else '<div class="overview-copy">No stock briefs yet. Run a cycle to populate the page.</div>'}
-      </div>
-      {''.join(panels) if panels else '<div class="overview-copy">No stock briefs yet. Run a cycle to populate the page.</div>'}
+      {''.join(panels) if panels else '<div class="chip">No stock briefs yet. Run one cycle to populate.</div>'}
     </section>
 
     <div class="footer">
-      Runtime root: {esc(snapshot.get('runtime_root', 'n/a'))}
+      Last check: {esc(heartbeat.get('last_check_utc') or state.get('last_check_utc') or 'n/a')} · Runtime root: {esc(snapshot.get('runtime_root', 'n/a'))}
     </div>
   </div>
   <script>
-    const buttons = Array.from(document.querySelectorAll('.tab-button'));
-    const panels = Array.from(document.querySelectorAll('.panel[data-panel]'));
-    function show(symbol) {{
-      buttons.forEach(btn => btn.classList.toggle('active', btn.dataset.symbol === symbol));
-      panels.forEach(panel => panel.hidden = panel.dataset.panel !== symbol);
-      const data = window.__SNAPSHOT__ || {{}};
-      document.title = 'stock_news_watch · ' + symbol;
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    const panels = Array.from(document.querySelectorAll('.panel'));
+    function activate(targetId) {{
+      tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.target === targetId));
+      panels.forEach(panel => panel.classList.toggle('active', panel.id === targetId));
     }}
-    buttons.forEach(btn => btn.addEventListener('click', () => show(btn.dataset.symbol)));
-    if (buttons.length) {{
-      show(buttons.find(btn => btn.classList.contains('active'))?.dataset.symbol || buttons[0].dataset.symbol);
+    tabs.forEach(tab => tab.addEventListener('click', () => activate(tab.dataset.target)));
+    if (tabs.length) {{
+      activate(tabs[0].dataset.target);
     }}
     async function refreshSnapshot() {{
       try {{
         const res = await fetch('/api/state', {{ cache: 'no-store' }});
         const data = await res.json();
-        window.__SNAPSHOT__ = data;
         if (data.heartbeat?.revision !== {int(heartbeat.get('revision', state.get('revision', 0)) or 0)}) {{
           window.location.reload();
         }}
@@ -758,12 +460,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            self._send_html(
-                render_dashboard_html(
-                    self.server.engine.snapshot(),
-                    self.server.engine.config.dashboard.refresh_seconds,
-                )
-            )
+            self._send_html(render_dashboard_html(self.server.engine.snapshot(), self.server.engine.config.dashboard.refresh_seconds))
             return
         if parsed.path == "/api/state":
             self._send_json(self.server.engine.snapshot())

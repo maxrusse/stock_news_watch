@@ -58,14 +58,14 @@ class EngineTests(unittest.TestCase):
                             overall_status="critical",
                             alert=True,
                             overall_score=5,
-                            overall_label="Critical sell",
+                            overall_label="Likely bad within weeks",
                             summary="critical negative flags detected",
                             reasons=["MSFT guidance cut"],
                             signals=[{"symbol": "MSFT", "severity": "critical", "title": "Microsoft warns of guidance cut", "url": "https://example.com/1", "why": "guidance cut"}],
                             sources_reviewed=["rss"],
                             decision_source="codex",
                             model="gpt-5.4-mini",
-                            briefs=[{"symbol": "MSFT", "score": 5, "label": "Critical sell", "summary": "MSFT is critical sell.", "source_count": 1, "item_count": 1, "themes": ["guidance cut"], "sources": ["rss"], "top_headlines": []}],
+                            briefs=[{"symbol": "MSFT", "score": 5, "label": "Likely bad within weeks", "summary": "MSFT looks materially worse over the next few weeks.", "source_count": 1, "item_count": 1, "themes": ["guidance cut"], "sources": ["rss"], "top_headlines": []}],
                         )
 
                 engine_mod.CodexReviewer = _FakeReviewer

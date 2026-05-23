@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .news import NewsItem, aggregate_symbol_briefs
+from .news import NewsItem, build_symbol_bundles
 
 
 @dataclass(frozen=True)
@@ -26,98 +26,53 @@ class ReviewResult:
 
 
 class HeuristicReviewer:
-    NEGATIVE_TERMS = (
-        "guidance cut",
-        "investigation",
-        "lawsuit",
-        "antitrust",
-        "data breach",
-        "outage",
-        "recall",
-        "downgrade",
-        "misses estimates",
-        "revenue decline",
-        "profit warning",
-        "ceo exit",
-        "cfo exit",
-        "mass layoff",
-        "sec",
-        "probe",
-    )
-
     def review(self, items: list[NewsItem], model: str = "heuristic") -> ReviewResult:
-        briefs = aggregate_symbol_briefs(items)
-        if not briefs:
-            return ReviewResult(
-                overall_status="clean",
-                alert=False,
-                overall_score=3,
-                overall_label="Mixed / watch",
-                summary="No live items collected.",
-                reasons=[],
-                signals=[],
-                sources_reviewed=[],
-                decision_source="heuristic",
-                model=model,
-                briefs=[],
-            )
-        signals: list[dict[str, Any]] = []
-        reasons: list[str] = []
+        bundles = build_symbol_bundles(items)
         reviewed_sources = sorted({item.source for item in items})
-        for item in items:
-            text = f"{item.title} {item.summary}".lower()
-            hits = [term for term in self.NEGATIVE_TERMS if term.lower() in text]
-            if hits:
-                reasons.append(f"{item.symbol}: {item.title}")
-                signals.append(
-                    {
-                        "symbol": item.symbol,
-                        "severity": "critical",
-                        "title": item.title,
-                        "url": item.url,
-                        "why": f"matched {', '.join(hits[:3])}",
-                    }
-                )
-        overall_score = max(int(brief.get("score", 3)) for brief in briefs)
-        overall_label = next((str(brief.get("label", "Mixed / watch")) for brief in briefs if int(brief.get("score", 3)) == overall_score), "Mixed / watch")
-        if signals:
-            summary = self._build_summary(briefs)
-            return ReviewResult(
-                overall_status="critical" if overall_score >= 4 else "watch",
-                alert=overall_score >= 4,
-                overall_score=overall_score,
-                overall_label=overall_label,
-                summary=summary,
-                reasons=reasons,
-                signals=signals,
-                sources_reviewed=reviewed_sources,
-                decision_source="heuristic",
-                model=model,
-                briefs=briefs,
-            )
-        summary = self._build_summary(briefs)
+        summary = f"Packed {len(items)} live items into {len(bundles)} stock buckets." if bundles else "No live items collected."
         return ReviewResult(
-            overall_status="clean",
+            overall_status="watch" if bundles else "clean",
             alert=False,
-            overall_score=overall_score,
-            overall_label=overall_label,
+            overall_score=3,
+            overall_label="Mixed / watch",
             summary=summary,
             reasons=[],
             signals=[],
             sources_reviewed=reviewed_sources,
             decision_source="heuristic",
             model=model,
-            briefs=briefs,
+            briefs=[self._placeholder_brief(bundle) for bundle in bundles],
         )
 
-    def _build_summary(self, briefs: list[dict[str, Any]]) -> str:
-        if not briefs:
-            return "No live items collected."
-        strongest = briefs[0]
-        parts = [f"{strongest['symbol']} is {strongest['label'].lower()}."]
-        if strongest.get("themes"):
-            parts.append(f"Key themes: {', '.join(strongest['themes'][:3])}.")
-        return " ".join(parts)
+    def _placeholder_brief(self, bundle: dict[str, Any]) -> dict[str, Any]:
+        items = list(bundle.get("items", []) or [])
+        note = "Raw evidence collected. LLM scoring unavailable."
+        return {
+            "symbol": bundle.get("symbol", ""),
+            "score": 3,
+            "label": "Mixed / watch",
+            "takeaway": note,
+            "why_it_matters": note,
+            "summary": note,
+            "source_count": int(bundle.get("source_count", 0) or 0),
+            "item_count": int(bundle.get("item_count", 0) or 0),
+            "themes": [],
+            "sources": list(bundle.get("sources", []) or []),
+            "top_headlines": [
+                {
+                    "title": item.get("title", ""),
+                    "source": item.get("source", ""),
+                    "url": item.get("url", ""),
+                    "published_utc": item.get("published_utc", ""),
+                    "kind": item.get("kind", "news"),
+                    "tone": "neutral",
+                    "why": note,
+                }
+                for item in items[:4]
+            ],
+            "critical_notes": [note] if items else [],
+            "routine_notes": ["Raw evidence only. LLM scoring unavailable."] if items else [],
+        }
 
 
 class CodexReviewer:
@@ -167,13 +122,16 @@ class CodexReviewer:
         payload = {
             "symbols": symbols,
             "items": [item.to_dict() for item in items[:80]],
-            "briefs": aggregate_symbol_briefs(items),
+            "bundles": build_symbol_bundles(items),
             "instruction": (
                 "You are reviewing live stock-market news for MSFT, AAPL, and GOOGL. "
                 "Return only JSON with overall_status, alert, overall_score, overall_label, summary, reasons, signals, sources_reviewed, briefs. "
-                "Aggregate by symbol first. Use a 6-class horizon scale where 1 is strongly positive, 3 is beware / short-term hype, and 6 is likely bad within weeks. "
-                "Only mark an item critical if it is a major negative event that could matter over the next week or month. "
+                "You will be given raw items and grouped bundles per symbol. Decide the buckets and scores yourself. "
+                "Use a 6-class horizon scale where 1 is strongly positive, 3 is beware / short-term hype, 4 is mixed / watch, 5 is concerning over weeks, and 6 is likely bad within weeks. "
+                "Do not use keyword counting or string matching as the decision rule. Read the evidence and judge the story. "
+                "Only call something concerning if it could matter over the next week or month. "
                 "Do not recommend trading or liquidation; this is informational only. "
+                "For each symbol brief, write in plain language. Include a one-sentence takeaway, a one-sentence why_it_matters, a few short themes, and short critical_notes versus routine_notes so the dashboard can show what is actually important versus what is probably routine. "
                 + prompt_suffix
             ),
         }
@@ -211,6 +169,8 @@ class CodexReviewer:
                             "symbol": {"type": "string"},
                             "score": {"type": "integer"},
                             "label": {"type": "string"},
+                            "takeaway": {"type": "string"},
+                            "why_it_matters": {"type": "string"},
                             "summary": {"type": "string"},
                             "source_count": {"type": "integer"},
                             "item_count": {"type": "integer"},
@@ -233,6 +193,8 @@ class CodexReviewer:
                                     "additionalProperties": False,
                                 },
                             },
+                            "critical_notes": {"type": "array", "items": {"type": "string"}},
+                            "routine_notes": {"type": "array", "items": {"type": "string"}},
                         },
                         "required": ["symbol", "score", "label", "summary", "source_count", "item_count", "themes", "sources", "top_headlines"],
                         "additionalProperties": False,

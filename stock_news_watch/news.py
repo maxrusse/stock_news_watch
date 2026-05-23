@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 import json
-from collections import Counter, defaultdict
+from collections import defaultdict
 import re
 import urllib.parse
 import urllib.request
@@ -20,88 +20,6 @@ SEC_HEADERS = {
     "Accept-Encoding": "gzip, deflate",
     "Host": "www.sec.gov",
 }
-
-SCALE_LABELS = {
-    1: "Strong positive",
-    2: "Okay",
-    3: "Beware / short-term hype",
-    4: "Mixed / watch",
-    5: "Concerning over weeks",
-    6: "Likely bad within weeks",
-}
-
-SEVERE_NEGATIVE_TERMS = (
-    "guidance cut",
-    "investigation",
-    "lawsuit",
-    "antitrust",
-    "data breach",
-    "outage",
-    "recall",
-    "downgrade",
-    "misses estimates",
-    "revenue decline",
-    "profit warning",
-    "ceo exit",
-    "cfo exit",
-    "mass layoff",
-    "probe",
-    "fine",
-    "charges",
-    "subpoena",
-    "settlement",
-)
-
-MODERATE_NEGATIVE_TERMS = (
-    "scrutiny",
-    "appeal",
-    "complaint",
-    "warning",
-    "pressure",
-    "decline",
-    "slump",
-    "drop",
-    "lawsuit",
-    "probe",
-    "delays",
-    "delay",
-    "pushback",
-    "recall",
-    "downgrade",
-)
-
-POSITIVE_TERMS = (
-    "beats estimates",
-    "beat estimates",
-    "raises guidance",
-    "raised guidance",
-    "restored",
-    "recovers",
-    "upgrade",
-    "approval",
-    "wins",
-    "record",
-    "expands",
-    "launches",
-    "partnership",
-    "agreement",
-    "strong growth",
-)
-
-HYPE_TERMS = (
-    "launches",
-    "launch",
-    "expands",
-    "expansion",
-    "partnership",
-    "agreement",
-    "record",
-    "wins",
-    "approval",
-    "upgrade",
-    "strong growth",
-    "rollout",
-)
 
 
 @dataclass(frozen=True)
@@ -124,37 +42,8 @@ def http_get(url: str, headers: dict[str, str] | None = None, timeout: int = 20)
         return resp.read()
 
 
-def normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", str(text or "").strip()).lower()
-
-
-def match_terms(text: str, terms: tuple[str, ...]) -> list[str]:
-    lowered = normalize_text(text)
-    return [term for term in terms if term in lowered]
-
-
-def item_impact(item: NewsItem) -> tuple[int, list[str], list[str]]:
-    text = f"{item.title} {item.summary}"
-    severe = match_terms(text, SEVERE_NEGATIVE_TERMS)
-    moderate = match_terms(text, MODERATE_NEGATIVE_TERMS)
-    positive = match_terms(text, POSITIVE_TERMS)
-
-    if item.kind in {"sec", "company_page"} and not severe and not moderate:
-        delta = -1 if positive else 0
-        return delta, [], positive
-
-    delta = 0
-    if severe:
-        delta += 2
-    elif moderate:
-        delta += 1
-    if positive:
-        delta -= 1
-    return delta, severe or moderate, positive
-
-
 def _headline_is_plausible(text: str) -> bool:
-    cleaned = normalize_text(text)
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip()).lower()
     if len(cleaned) < 12:
         return False
     if any(token in cleaned for token in ("background:", "url(", "{", "}", ".image-", "@media")):
@@ -353,137 +242,34 @@ def collect_news_bundle(symbols: list[str], sources_cfg: dict[str, Any]) -> list
     return deduped
 
 
-def aggregate_symbol_briefs(items: list[NewsItem]) -> list[dict[str, Any]]:
+def build_symbol_bundles(items: list[NewsItem]) -> list[dict[str, Any]]:
     by_symbol: dict[str, list[NewsItem]] = defaultdict(list)
     for item in items:
         by_symbol[item.symbol].append(item)
 
-    briefs: list[dict[str, Any]] = []
+    bundles: list[dict[str, Any]] = []
     for symbol in sorted(by_symbol):
         symbol_items = by_symbol[symbol]
-        if not symbol_items:
-            continue
-
-        positive_count = 0
-        hype_count = 0
-        severe_count = 0
-        moderate_count = 0
-        routine_count = 0
-        theme_counter: Counter[str] = Counter()
-        source_counter: Counter[str] = Counter()
-        critical_notes: list[str] = []
-        routine_notes: list[str] = []
-        scored_items: list[tuple[int, NewsItem, list[str], list[str]]] = []
-
+        symbol_items.sort(key=lambda item: (item.published_utc or "", item.title))
+        source_order: list[str] = []
+        seen_sources: set[str] = set()
         for item in symbol_items:
-            delta, negative_hits, positive_hits = item_impact(item)
-            severe_hits = [term for term in negative_hits if term in SEVERE_NEGATIVE_TERMS]
-            moderate_hits = [term for term in negative_hits if term in MODERATE_NEGATIVE_TERMS and term not in severe_hits]
-            hype_hits = [term for term in positive_hits if term in HYPE_TERMS]
-            severe_count += len(severe_hits)
-            moderate_count += len(moderate_hits)
-            positive_count += len(positive_hits)
-            hype_count += len(hype_hits)
-            if item.kind in {"sec", "company_page"} and not negative_hits:
-                routine_count += 1
-            for term in negative_hits:
-                theme_counter[term] += 1
-            for term in positive_hits:
-                theme_counter[term] += 1
-            source_counter[item.source] += 1
-            scored_items.append((delta, item, negative_hits, positive_hits))
-            if severe_hits:
-                critical_notes.append(f"{item.title} ({', '.join(severe_hits[:2])})")
-            elif moderate_hits:
-                routine_notes.append(f"{item.title} ({', '.join(moderate_hits[:2])})")
-            elif item.kind in {"sec", "company_page"}:
-                routine_notes.append(f"{item.title} (routine filing/update)")
+            if item.source not in seen_sources:
+                seen_sources.add(item.source)
+                source_order.append(item.source)
 
-        if severe_count >= 2 or (severe_count >= 1 and moderate_count >= 1):
-            score = 6
-        elif severe_count >= 1 or moderate_count >= 2:
-            score = 5
-        elif positive_count > 0 and severe_count == 0 and moderate_count == 0 and hype_count > 0:
-            score = 3
-        elif positive_count > 0 and severe_count == 0 and moderate_count == 0:
-            score = 2
-        elif positive_count == 0 and severe_count == 0 and moderate_count == 0:
-            score = 4
-        else:
-            score = 4
-
-        label = SCALE_LABELS[score]
-
-        if score >= 6:
-            headline = f"{symbol} looks like it could become a real problem over the next few weeks."
-        elif score == 5:
-            headline = f"{symbol} has a concern that may matter over the next week or month, but not every item is serious."
-        elif score == 4:
-            headline = f"{symbol} looks mixed: probably not a big deal yet, but worth watching over the next week or month."
-        elif score == 3:
-            headline = f"{symbol} looks exciting on the surface, but some items may just be short-term hype."
-        elif score == 2:
-            headline = f"{symbol} looks mostly okay over the next few weeks."
-        else:
-            headline = f"{symbol} looks constructive and not like a near-term problem."
-
-        themes = [theme for theme, _count in theme_counter.most_common(3)]
-        if themes:
-            headline += f" Main topics: {', '.join(themes)}."
-        if source_counter:
-            top_sources = ", ".join(source for source, _count in source_counter.most_common(3))
-            headline += f" Main sources: {top_sources}."
-        if routine_count and score <= 4:
-            headline += f" {routine_count} items look routine."
-
-        scored_items.sort(key=lambda entry: (-entry[0], entry[1].published_utc, entry[1].title))
-        top_headlines = []
-        for _delta, item, negative_hits, positive_hits in scored_items[:5]:
-            if negative_hits:
-                tone = "negative"
-            elif positive_hits:
-                tone = "positive"
-            else:
-                tone = "neutral"
-
-            if item.kind in {"sec", "company_page"} and not negative_hits:
-                why = "Routine filing or company update; usually not market-moving by itself."
-            elif negative_hits:
-                why = f"Matched {', '.join(negative_hits[:3])}."
-            elif positive_hits:
-                why = f"Matched {', '.join(positive_hits[:3])}."
-            else:
-                why = "No strong signal either way."
-            top_headlines.append(
-                {
-                    "title": item.title,
-                    "source": item.source,
-                    "url": item.url,
-                    "published_utc": item.published_utc,
-                    "kind": item.kind,
-                    "tone": tone,
-                    "why": why,
-                }
-            )
-
-        briefs.append(
+        bundles.append(
             {
                 "symbol": symbol,
-                "score": score,
-                "label": label,
-                "summary": headline,
-                "source_count": len(source_counter),
                 "item_count": len(symbol_items),
-                "critical_count": severe_count,
-                "routine_count": routine_count,
-                "hype_count": hype_count,
-                "themes": themes,
-                "sources": [source for source, _count in source_counter.most_common(4)],
-                "top_headlines": top_headlines,
-                "critical_notes": critical_notes[:5],
-                "routine_notes": routine_notes[:5],
+                "source_count": len(seen_sources),
+                "sources": source_order[:8],
+                "items": [item.to_dict() for item in symbol_items[:80]],
             }
         )
 
-    briefs.sort(key=lambda brief: (-int(brief["score"]), brief["symbol"]))
-    return briefs
+    return bundles
+
+
+def aggregate_symbol_briefs(items: list[NewsItem]) -> list[dict[str, Any]]:
+    return build_symbol_bundles(items)

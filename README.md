@@ -62,6 +62,16 @@ python -m stock_news_watch status
 
 To use the Codex-powered review path, install and authenticate the Codex CLI, then make sure `codex` is on your `PATH`.
 
+If you want the login to stay isolated to this repo, point `CODEX_HOME` at a repo-local folder before logging in, the same way the other workspace projects do:
+
+```powershell
+$env:CODEX_HOME = "C:\Users\Max\code\work\stock_news_watch\.runtime\codex_home"
+codex login --device-auth
+codex login status
+```
+
+That keeps the Codex session and cached auth data scoped to this project instead of your whole user profile.
+
 The default runtime settings use:
 
 - model: `gpt-5.4-mini`
@@ -74,6 +84,8 @@ Live sources include:
 - Google News RSS queries that pull Reuters/AP and official company pages
 - SEC filings
 - Company newsroom pages
+
+If you prefer, use [`scripts/login_codex.ps1`](scripts/login_codex.ps1) to run the same flow with a repo-local `CODEX_HOME`.
 
 ## Heartbeat
 

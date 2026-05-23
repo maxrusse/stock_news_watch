@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from stock_news_watch.news import NewsItem, aggregate_symbol_briefs, parse_rss_feed
+from stock_news_watch.news import NewsItem, build_symbol_bundles, parse_rss_feed
 
 
 RSS_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -26,19 +26,18 @@ class NewsParsingTests(unittest.TestCase):
         self.assertEqual(items[0].title, "Microsoft warns of revenue decline in key unit")
         self.assertEqual(items[0].source, "rss")
 
-    def test_aggregate_symbol_briefs(self) -> None:
+    def test_build_symbol_bundles(self) -> None:
         items = [
             NewsItem(symbol="MSFT", title="Microsoft faces lawsuit over cloud licenses", source="reuters", url="https://example.com/1", summary="lawsuit"),
             NewsItem(symbol="MSFT", title="Microsoft restores service after outage", source="ap", url="https://example.com/2", summary="outage"),
             NewsItem(symbol="AAPL", title="Apple reports results and raises guidance", source="apple", url="https://example.com/3", summary="raises guidance"),
         ]
-        briefs = aggregate_symbol_briefs(items)
-        self.assertEqual(briefs[0]["symbol"], "MSFT")
-        self.assertGreaterEqual(briefs[0]["score"], 4)
-        self.assertIn("Likely bad", briefs[0]["label"])
-        self.assertIn("lawsuit", briefs[0]["summary"])
-        self.assertEqual(briefs[-1]["symbol"], "AAPL")
-        self.assertLessEqual(briefs[-1]["score"], 3)
+        bundles = build_symbol_bundles(items)
+        self.assertEqual(bundles[0]["symbol"], "AAPL")
+        self.assertEqual(bundles[1]["symbol"], "MSFT")
+        self.assertEqual(bundles[1]["item_count"], 2)
+        self.assertEqual(bundles[1]["source_count"], 2)
+        self.assertIn("https://example.com/1", {item["url"] for item in bundles[1]["items"]})
 
 
 if __name__ == "__main__":

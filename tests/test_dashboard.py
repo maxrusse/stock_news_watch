@@ -24,10 +24,45 @@ class DashboardTests(unittest.TestCase):
             )
             engine = StockNewsWatchEngine(config)
             snapshot = engine.snapshot()
+            snapshot["heartbeat"] = {**snapshot.get("heartbeat", {}), "status": "running", "overall_label": "Mixed / watch", "overall_score": 3}
+            snapshot["assessment"] = {
+                **snapshot.get("assessment", {}),
+                "overall_label": "Mixed / watch",
+                "overall_score": 3,
+                "briefs": [
+                    {
+                        "symbol": "MSFT",
+                        "score": 3,
+                        "label": "Mixed / watch",
+                        "takeaway": "Microsoft looks mostly routine right now.",
+                        "why_it_matters": "Nothing here reads like a near-term problem, so the stock is mostly in watch mode.",
+                        "summary": "Microsoft looks mostly routine right now.",
+                        "source_count": 2,
+                        "item_count": 3,
+                        "themes": ["product update", "analyst chatter"],
+                        "sources": ["reuters", "apple.com/newsroom"],
+                        "critical_notes": ["No clear material problem in the current bundle."],
+                        "routine_notes": ["A lot of the items look like ordinary product or coverage noise."],
+                        "top_headlines": [
+                            {
+                                "title": "Microsoft updates product roadmap",
+                                "source": "reuters",
+                                "url": "https://example.com/msft-1",
+                                "published_utc": "2026-05-23T10:00:00Z",
+                                "kind": "news",
+                                "tone": "neutral",
+                                "why": "Routine product news, not a direct warning.",
+                            }
+                        ],
+                    }
+                ],
+            }
             html = render_dashboard_html(snapshot, refresh_seconds=10)
             self.assertIn("stock_news_watch", html)
-            self.assertIn("Select stock", html)
-            self.assertIn("weekly and monthly read", html)
+            self.assertIn("One tab per stock", html)
+            self.assertIn("Codex reads the live evidence", html)
+            self.assertIn("Why it matters", html)
+            self.assertIn("Important vs routine", html)
             self.assertIn("Mixed / watch", html)
 
 
