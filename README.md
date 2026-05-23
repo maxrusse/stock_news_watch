@@ -62,6 +62,15 @@ python -m stock_news_watch status
 
 To use the Codex-powered review path, install and authenticate the Codex CLI, then make sure `codex` is on your `PATH`.
 
+Quick check:
+
+```powershell
+Get-Command codex
+codex --help
+```
+
+If those commands fail, install the Codex CLI first and reopen the terminal.
+
 If you want the login to stay isolated to this repo, point `CODEX_HOME` at a repo-local folder before logging in, the same way the other workspace projects do:
 
 ```powershell
@@ -71,6 +80,28 @@ codex login status
 ```
 
 That keeps the Codex session and cached auth data scoped to this project instead of your whole user profile.
+
+If you prefer a one-liner helper, use [`scripts/login_codex.ps1`](scripts/login_codex.ps1):
+
+```powershell
+cd C:\Users\Max\code\work\stock_news_watch
+.\scripts\login_codex.ps1
+```
+
+After login, verify the session from the same terminal or a new terminal:
+
+```powershell
+$env:CODEX_HOME = "C:\Users\Max\code\work\stock_news_watch\.runtime\codex_home"
+codex login status
+```
+
+For debugging, run a single visible cycle first:
+
+```powershell
+python -m stock_news_watch run-once
+```
+
+That is the best way to confirm the dashboard, heartbeat, and Codex buckets are updating before you leave the loop running.
 
 The default runtime settings use:
 
@@ -84,8 +115,6 @@ Live sources include:
 - Google News RSS queries that pull Reuters/AP and official company pages
 - SEC filings
 - Company newsroom pages
-
-If you prefer, use [`scripts/login_codex.ps1`](scripts/login_codex.ps1) to run the same flow with a repo-local `CODEX_HOME`.
 
 ## Heartbeat
 
