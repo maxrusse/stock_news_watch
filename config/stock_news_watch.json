@@ -1,0 +1,84 @@
+{
+  "workspace_root": "C:\\Users\\Max\\code\\work\\stock_news_watch",
+  "runtime_dir": ".runtime",
+  "codex": {
+    "exe": "codex",
+    "model": "gpt-5.4-mini",
+    "reasoning_effort": "medium",
+    "web_search_mode": "auto",
+    "network_access_enabled": true,
+    "sandbox": "workspace-write",
+    "skip_git_repo_check": true,
+    "timeout_sec": 180
+  },
+  "runtime": {
+    "poll_seconds": 60,
+    "run_interval_seconds": 3600,
+    "schedule_mode": "market_hours",
+    "stop_when_outside_market_hours": false,
+    "market_timezone": "America/New_York",
+    "preopen_start": "08:30",
+    "market_open": "09:30",
+    "market_close": "16:00"
+  },
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "refresh_seconds": 20
+  },
+  "sources": {
+    "news_google_rss_base": "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en",
+    "yahoo_rss_base": "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US",
+    "google_queries": {
+      "MSFT": [
+        "MSFT Reuters",
+        "MSFT AP News",
+        "Microsoft site:news.microsoft.com/source/press-releases",
+        "Microsoft site:news.microsoft.com"
+      ],
+      "AAPL": [
+        "AAPL Reuters",
+        "AAPL AP News",
+        "Apple site:apple.com/newsroom",
+        "Apple site:investor.apple.com"
+      ],
+      "GOOGL": [
+        "GOOGL Reuters",
+        "GOOGL AP News",
+        "Alphabet site:abc.xyz/investor/news",
+        "Alphabet site:blog.google"
+      ]
+    },
+    "sec_forms": [
+      "8-K",
+      "10-Q",
+      "10-K",
+      "424B",
+      "S-3",
+      "13D",
+      "13G"
+    ],
+    "company_pages": {
+      "MSFT": "https://news.microsoft.com/source/tag/press-releases/",
+      "AAPL": "https://www.apple.com/newsroom/topics/company-news/",
+      "GOOGL": "https://abc.xyz/investor/news/"
+    }
+  },
+  "watch_terms": [
+    "guidance cut",
+    "investigation",
+    "SEC",
+    "lawsuit",
+    "antitrust",
+    "data breach",
+    "outage",
+    "recall",
+    "downgrade",
+    "misses estimates",
+    "revenue decline",
+    "profit warning",
+    "CEO exit",
+    "CFO exit",
+    "mass layoff"
+  ]
+}

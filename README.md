@@ -1,0 +1,101 @@
+# stock_news_watch
+
+`stock_news_watch` is a standalone, reusable Codex demo that watches live market news for `MSFT`, `AAPL`, and `GOOGL`, classifies only high-severity negative events, and exposes a live-refresh dashboard with a heartbeat and event log.
+
+## What it does
+
+- Runs as a self-contained Python project with its own virtual environment.
+- Checks live sources on an hourly cadence during market hours and a bit before open.
+- Can also run in `always_on` mode for 24/7 monitoring.
+- Uses `codex exec` with `gpt-5.4-mini` when available, with web search and network access enabled.
+- Falls back to a deterministic heuristic review if Codex is unavailable, so the demo still runs.
+- Stores runtime state in `.runtime/` and serves it through a small dashboard.
+- Stays alert-only: no brokerage integration, no auto-sell, no trade execution.
+
+## Project layout
+
+- `stock_news_watch/` application code
+- `config/stock_news_watch.json` default settings
+- `.runtime/` generated heartbeat, event, and state files
+- `tests/` unit and integration smoke tests
+
+## Setup
+
+```powershell
+cd C:\Users\Max\code\work\stock_news_watch
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+```
+
+This project uses only the Python standard library, so there are no third-party packages to install.
+
+## Run
+
+Start the dashboard and loop together:
+
+```powershell
+python -m stock_news_watch demo
+```
+
+Run just the dashboard:
+
+```powershell
+python -m stock_news_watch serve
+```
+
+Run just one cycle:
+
+```powershell
+python -m stock_news_watch run-once
+```
+
+Check status:
+
+```powershell
+python -m stock_news_watch status
+```
+
+## Codex setup
+
+To use the Codex-powered review path, install and authenticate the Codex CLI, then make sure `codex` is on your `PATH`.
+
+The default runtime settings use:
+
+- model: `gpt-5.4-mini`
+- web search: `auto`
+- network access: enabled
+
+Live sources include:
+
+- Yahoo Finance RSS
+- Google News RSS queries that pull Reuters/AP and official company pages
+- SEC filings
+- Company newsroom pages
+
+## Heartbeat
+
+The dashboard and runtime store update a structured heartbeat with fields such as:
+
+- `updated_utc`
+- `last_check_utc`
+- `last_alert_utc`
+- `last_summary`
+- `cycle_count`
+- `source_count`
+- `model`
+- `status`
+- `revision`
+
+## Operating modes
+
+- `market_hours`: runs hourly during the configured pre-open and market session window.
+- `always_on`: 24/7 mode that keeps checking on the same hourly cadence.
+
+## Safety
+
+- Alerts only.
+- No auto-sell logic.
+- No brokerage integration.
+- Safe internal state writes are auto-approved by the loop policy.
+- Out-of-scope or destructive actions are blocked.
