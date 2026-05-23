@@ -10,6 +10,16 @@ from typing import Any
 from .news import NewsItem, build_symbol_bundles
 
 
+LEVEL_LABELS = {
+    1: "Strong positive",
+    2: "Okay",
+    3: "Beware / short-term hype",
+    4: "Mixed / watch",
+    5: "Concerning over weeks",
+    6: "Likely bad within weeks",
+}
+
+
 @dataclass(frozen=True)
 class ReviewResult:
     overall_status: str
@@ -118,15 +128,16 @@ class CodexReviewer:
         thread_file = thread_file or Path(".runtime/codex_thread_id.txt")
         trace_dir = trace_dir or Path(".runtime/codex_traces")
         trace_dir.mkdir(parents=True, exist_ok=True)
+        bundles = build_symbol_bundles(items)
 
         payload = {
             "symbols": symbols,
             "items": [item.to_dict() for item in items[:80]],
-            "bundles": build_symbol_bundles(items),
+            "bundles": bundles,
             "instruction": (
                 "You are reviewing live stock-market news for MSFT, AAPL, and GOOGL. "
                 "Return only JSON with overall_status, alert, overall_score, overall_label, summary, reasons, signals, sources_reviewed, briefs. "
-                "You will be given raw items and grouped bundles per symbol. Decide the buckets and scores yourself. "
+                "You will be given raw items and grouped bundles per symbol. Decide exactly one brief per symbol and keep the symbols aligned to the provided buckets. "
                 "Use a 6-class horizon scale where 1 is strongly positive, 3 is beware / short-term hype, 4 is mixed / watch, 5 is concerning over weeks, and 6 is likely bad within weeks. "
                 "Do not use keyword counting or string matching as the decision rule. Read the evidence and judge the story. "
                 "Only call something concerning if it could matter over the next week or month. "
@@ -256,19 +267,7 @@ class CodexReviewer:
         parsed = _parse_codex_jsonl(proc.stdout or "")
         if parsed is None:
             return HeuristicReviewer().review(items, model=self.model)
-        return ReviewResult(
-            overall_status=str(parsed.get("overall_status", "clean")),
-            alert=bool(parsed.get("alert", False)),
-            overall_score=int(parsed.get("overall_score", 3) or 3),
-            overall_label=str(parsed.get("overall_label", "Mixed / watch")),
-            summary=str(parsed.get("summary", "")).strip(),
-            reasons=[str(x) for x in parsed.get("reasons", [])],
-            signals=[dict(x) for x in parsed.get("signals", []) if isinstance(x, dict)],
-            sources_reviewed=[str(x) for x in parsed.get("sources_reviewed", [])],
-            decision_source="codex",
-            model=self.model,
-            briefs=[dict(x) for x in parsed.get("briefs", []) if isinstance(x, dict)],
-        )
+        return _normalize_review(parsed, items=items, symbols=symbols, bundles=bundles, model=self.model)
 
 
 def _parse_codex_jsonl(stdout_text: str) -> dict[str, Any] | None:
@@ -298,3 +297,174 @@ def _parse_codex_jsonl(stdout_text: str) -> dict[str, Any] | None:
         if isinstance(obj, dict):
             parsed = obj
     return parsed
+
+
+def _score_to_label(score: int) -> str:
+    return LEVEL_LABELS.get(score, "Mixed / watch")
+
+
+def _clamp_score(value: Any, default: int = 3) -> int:
+    try:
+        score = int(value)
+    except Exception:
+        score = default
+    return max(1, min(6, score))
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for entry in value:
+        text = str(entry).strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _brief_from_bundle(bundle: dict[str, Any], *, note: str, score: int = 3, label: str = "Mixed / watch") -> dict[str, Any]:
+    items = list(bundle.get("items", []) or [])
+    themes = _as_str_list(bundle.get("themes", []))
+    top_headlines = []
+    for item in items[:4]:
+        top_headlines.append(
+            {
+                "title": str(item.get("title", "")),
+                "source": str(item.get("source", "")),
+                "url": str(item.get("url", "")),
+                "published_utc": str(item.get("published_utc", "")),
+                "kind": str(item.get("kind", "news")),
+                "tone": "neutral",
+                "why": note,
+            }
+        )
+    return {
+        "symbol": str(bundle.get("symbol", "")).upper(),
+        "score": score,
+        "label": label,
+        "takeaway": note,
+        "why_it_matters": note,
+        "summary": note,
+        "source_count": int(bundle.get("source_count", 0) or 0),
+        "item_count": int(bundle.get("item_count", 0) or 0),
+        "themes": themes,
+        "sources": _as_str_list(bundle.get("sources", [])),
+        "top_headlines": top_headlines,
+        "critical_notes": [note] if items else [],
+        "routine_notes": ["Raw evidence only. LLM scoring unavailable."] if items else [],
+    }
+
+
+def _normalize_brief(brief: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
+    score = _clamp_score(brief.get("score", 3))
+    label = _score_to_label(score)
+    summary = str(brief.get("summary", "")).strip() or str(brief.get("takeaway", "")).strip()
+    takeaway = str(brief.get("takeaway", "")).strip() or summary
+    why_it_matters = str(brief.get("why_it_matters", "")).strip() or summary or takeaway
+    if not summary:
+        summary = "LLM review produced a bucket with no summary."
+    if not takeaway:
+        takeaway = summary
+    if not why_it_matters:
+        why_it_matters = summary
+
+    sources = _as_str_list(brief.get("sources", [])) or _as_str_list(bundle.get("sources", []))
+    themes = _as_str_list(brief.get("themes", []))
+    source_count = int(brief.get("source_count", bundle.get("source_count", 0)) or 0)
+    item_count = int(brief.get("item_count", bundle.get("item_count", 0)) or 0)
+    top_headlines_raw = brief.get("top_headlines", [])
+    top_headlines: list[dict[str, Any]] = []
+    if isinstance(top_headlines_raw, list):
+        for item in top_headlines_raw[:4]:
+            if not isinstance(item, dict):
+                continue
+            top_headlines.append(
+                {
+                    "title": str(item.get("title", "")),
+                    "source": str(item.get("source", "")),
+                    "url": str(item.get("url", "")),
+                    "published_utc": str(item.get("published_utc", "")),
+                    "kind": str(item.get("kind", "news")),
+                    "tone": str(item.get("tone", "neutral")),
+                    "why": str(item.get("why", summary or takeaway)),
+                }
+            )
+    if not top_headlines:
+        top_headlines = _brief_from_bundle(bundle, note=why_it_matters, score=score, label=label)["top_headlines"]
+
+    critical_notes = _as_str_list(brief.get("critical_notes", []))
+    routine_notes = _as_str_list(brief.get("routine_notes", []))
+    if not critical_notes and score >= 5:
+        critical_notes = [why_it_matters]
+    if not routine_notes and score <= 3:
+        routine_notes = [takeaway]
+
+    return {
+        "symbol": str(brief.get("symbol", bundle.get("symbol", ""))).upper(),
+        "score": score,
+        "label": label,
+        "takeaway": takeaway,
+        "why_it_matters": why_it_matters,
+        "summary": summary,
+        "source_count": source_count,
+        "item_count": item_count,
+        "themes": themes,
+        "sources": sources,
+        "top_headlines": top_headlines,
+        "critical_notes": critical_notes,
+        "routine_notes": routine_notes,
+    }
+
+
+def _normalize_review(
+    parsed: dict[str, Any],
+    *,
+    items: list[NewsItem],
+    symbols: list[str],
+    bundles: list[dict[str, Any]],
+    model: str,
+) -> ReviewResult:
+    bundle_map = {str(bundle.get("symbol", "")).upper(): bundle for bundle in bundles}
+    parsed_briefs = [dict(x) for x in parsed.get("briefs", []) if isinstance(x, dict)]
+    brief_map = {str(brief.get("symbol", "")).upper(): brief for brief in parsed_briefs if str(brief.get("symbol", "")).strip()}
+
+    normalized_briefs: list[dict[str, Any]] = []
+    for symbol in symbols:
+        symbol_key = str(symbol).upper()
+        bundle = bundle_map.get(symbol_key, {"symbol": symbol_key, "item_count": 0, "source_count": 0, "sources": [], "items": []})
+        raw_brief = brief_map.get(symbol_key)
+        if raw_brief is None:
+            normalized_briefs.append(_brief_from_bundle(bundle, note="Raw evidence collected. LLM did not return a usable brief for this symbol."))
+        else:
+            normalized_briefs.append(_normalize_brief(raw_brief, bundle))
+
+    overall_score = _clamp_score(parsed.get("overall_score", 3))
+    overall_label = _score_to_label(overall_score)
+    summary = str(parsed.get("summary", "")).strip() or "Codex returned a market summary."
+    reasons = _as_str_list(parsed.get("reasons", []))
+    signals = [dict(x) for x in parsed.get("signals", []) if isinstance(x, dict)]
+    sources_reviewed = _as_str_list(parsed.get("sources_reviewed", []))
+    if not sources_reviewed:
+        sources_reviewed = sorted({item.source for item in items})
+
+    if overall_score >= 5:
+        overall_status = "critical"
+    elif overall_score >= 3:
+        overall_status = "watch"
+    else:
+        overall_status = "clean"
+    alert = bool(parsed.get("alert", False)) or overall_status == "critical"
+
+    return ReviewResult(
+        overall_status=overall_status,
+        alert=alert,
+        overall_score=overall_score,
+        overall_label=overall_label,
+        summary=summary,
+        reasons=reasons,
+        signals=signals,
+        sources_reviewed=sources_reviewed,
+        decision_source="codex",
+        model=model,
+        briefs=normalized_briefs,
+    )
